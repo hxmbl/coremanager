@@ -9,8 +9,9 @@ build:
 	go build -o $(BINARY) .
 
 install: build
-	install -Dm755 $(BINARY) $(DESTDIR)$(BINDIR)/$(BINARY)
-	ln -sf $(BINDIR)/$(BINARY) $(DESTDIR)$(BINDIR)/$(ALIAS)
+	mkdir -p $(DESTDIR)$(BINDIR)
+	install -m 755 $(BINARY) $(DESTDIR)$(BINDIR)/$(BINARY)
+	ln -sf $(BINARY) $(DESTDIR)$(BINDIR)/$(ALIAS)
 
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/$(BINARY)

@@ -35,13 +35,24 @@ coremanager ec a  # Enable all cores
 
 `ec` for enabling
 
+Enabling/disabling cores requires root:
+
+```bash
+sudo coremanager dc 2
+```
+
 
 
 The core on and off doesn't turn off an exact core, just a number of them.
 
 ### Everything Else
 
-P.S. Alias for coremanager is cm
+P.S. Alias for coremanager is cm. `make install` creates it for you; if you
+installed the binary some other way:
+
+```bash
+sudo ln -sf "$(command -v coremanager)" /usr/local/bin/cm
+```
 
 ```bash
 cm cc             # Show the Core Count of active and total
@@ -53,6 +64,8 @@ cm debug          # Shows debug info (if that's useful to you...)
 
 All commands accept `-v`/`--verbose` for detailed output.
 
+`coremanager --version` shows the build version.
+
 ## License
 
-No.
+MIT — see [LICENSE](LICENSE).

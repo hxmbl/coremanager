@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strconv"
@@ -19,22 +20,60 @@ const (
 	colorReset  = "\033[0m"
 )
 
-func green(s string) string  { return colorGreen + s + colorReset }
-func red(s string) string    { return colorRed + s + colorReset }
-func yellow(s string) string { return colorYellow + s + colorReset }
-func blue(s string) string   { return colorBlue + s + colorReset }
+var (
+	version  = "dev"
+	verbose  bool
+	colorOut bool
+	colorErr bool
+)
 
-var verbose bool
+// isCharDevice reports whether f refers to a terminal-like device.
+func isCharDevice(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+// detectColors enables ANSI output only for interactive streams, honoring
+// the NO_COLOR convention and the "dumb" terminal type.
+func detectColors() {
+	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
+		return
+	}
+	colorOut = isCharDevice(os.Stdout)
+	colorErr = isCharDevice(os.Stderr)
+}
+
+func paint(toStderr bool, code, s string) string {
+	enabled := colorOut
+	if toStderr {
+		enabled = colorErr
+	}
+	if !enabled {
+		return s
+	}
+	return code + s + colorReset
+}
+
+func green(s string) string  { return paint(false, colorGreen, s) }
+func red(s string) string    { return paint(true, colorRed, s) }
+func yellow(s string) string { return paint(false, colorYellow, s) }
+func blue(s string) string   { return paint(false, colorBlue, s) }
 
 func main() {
+	detectColors()
+
 	rootCmd := &cobra.Command{
-		Use:   "coremanager",
-		Short: "A simple CLI tool to manage CPU cores on Linux",
-		Long:  "CoreManager - Manage CPU cores dynamically to save battery or reduce heat.",
+		Use:           "coremanager",
+		Short:         "A simple CLI tool to manage CPU cores on Linux",
+		Long:          "CoreManager - Manage CPU cores dynamically to save battery or reduce heat.",
+		Version:       version,
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Run: func(cmd *cobra.Command, args []string) {
 			cmd.Help()
 		},
 	}
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 
 	disableCmd := &cobra.Command{
 		Use:     "dc [N|all]",
@@ -45,7 +84,6 @@ func main() {
 			return runDisableCores(args[0])
 		},
 	}
-	disableCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 
 	enableCmd := &cobra.Command{
 		Use:     "ec [N|all]",
@@ -56,7 +94,6 @@ func main() {
 			return runEnableCores(args[0])
 		},
 	}
-	enableCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 
 	coreCountCmd := &cobra.Command{
 		Use:     "cc",
@@ -94,14 +131,24 @@ func main() {
 }
 
 func runDisableCores(arg string) error {
-	if strings.ToLower(arg) == "all" || strings.ToLower(arg) == "a" {
+	arg = strings.TrimSpace(arg)
+	if arg == "" {
+		return fmt.Errorf("specify how many cores to disable, or 'all'")
+	}
+	switch strings.ToLower(arg) {
+	case "all", "a":
 		if verbose {
 			fmt.Println(yellow("Disabling all secondary cores..."))
 		}
-		if err := logic.DisableAll(verbose); err != nil {
+		n, err := logic.DisableAll(verbose)
+		if err != nil {
 			return err
 		}
-		fmt.Println(green("All secondary cores disabled."))
+		if n == 0 {
+			fmt.Println(yellow("No secondary cores needed disabling."))
+		} else {
+			fmt.Println(green(fmt.Sprintf("Disabled %d secondary core(s).", n)))
+		}
 		return nil
 	}
 
@@ -113,22 +160,33 @@ func runDisableCores(arg string) error {
 		return fmt.Errorf("must disable at least 1 core")
 	}
 
-	if err := logic.Disable(target, verbose); err != nil {
+	n, err := logic.Disable(target, verbose)
+	if err != nil {
 		return err
 	}
-	fmt.Println(green(fmt.Sprintf("Disabled %d core(s).", target)))
+	fmt.Println(green(fmt.Sprintf("Disabled %d core(s).", n)))
 	return nil
 }
 
 func runEnableCores(arg string) error {
-	if strings.ToLower(arg) == "all" || strings.ToLower(arg) == "a" {
+	arg = strings.TrimSpace(arg)
+	if arg == "" {
+		return fmt.Errorf("specify how many cores to enable, or 'all'")
+	}
+	switch strings.ToLower(arg) {
+	case "all", "a":
 		if verbose {
 			fmt.Println(yellow("Enabling all secondary cores..."))
 		}
-		if err := logic.EnableAll(verbose); err != nil {
+		n, err := logic.EnableAll(verbose)
+		if err != nil {
 			return err
 		}
-		fmt.Println(green("All secondary cores enabled."))
+		if n == 0 {
+			fmt.Println(yellow("No secondary cores needed enabling."))
+		} else {
+			fmt.Println(green(fmt.Sprintf("Enabled %d secondary core(s).", n)))
+		}
 		return nil
 	}
 
@@ -140,10 +198,11 @@ func runEnableCores(arg string) error {
 		return fmt.Errorf("must enable at least 1 core")
 	}
 
-	if err := logic.Enable(target, verbose); err != nil {
+	n, err := logic.Enable(target, verbose)
+	if err != nil {
 		return err
 	}
-	fmt.Println(green(fmt.Sprintf("Enabled %d core(s).", target)))
+	fmt.Println(green(fmt.Sprintf("Enabled %d core(s).", n)))
 	return nil
 }
 
@@ -175,12 +234,12 @@ func runDebugInfo() error {
 	fmt.Println(blue(fmt.Sprintf("CPU Model: %s", info.Model)))
 	fmt.Println(blue(fmt.Sprintf("Total CPU cores: %d", info.TotalCores)))
 	fmt.Println(blue(fmt.Sprintf("Active CPU cores: %d", info.ActiveCores)))
+	fmt.Println(blue(fmt.Sprintf("Core IDs: %v", info.CoreIDs)))
 	fmt.Println(blue(fmt.Sprintf("Core states (0=offline, 1=online): %v", info.CoreStates)))
 
 	fmt.Print("Type 'a' for a lot of info. Press Enter to continue... ")
-	var input string
-	fmt.Scanln(&input)
-	if strings.ToLower(input) == "a" {
+	input, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	if strings.EqualFold(strings.TrimSpace(input), "a") {
 		fmt.Println(blue("Detailed info:"))
 		raw, err := logic.AllCPU()
 		if err != nil {
